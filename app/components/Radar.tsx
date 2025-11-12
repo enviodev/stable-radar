@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface RadarProps {
   chainName: string;
@@ -22,6 +22,7 @@ interface RadarTransaction {
   hash: string;
   size: number; // Circle radius in pixels
   discovered: boolean; // Whether sweep has passed over it
+  value: string; // USDC value for tooltip
 }
 
 export default function Radar({ chainName, transactionCount, color = '#00ff00', blockTime, transactions }: RadarProps) {
@@ -31,6 +32,7 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
   const previousSweepAngleRef = useRef(0);
   const animationFrameRef = useRef<number | undefined>(undefined);
   const seenHashesRef = useRef<Set<string>>(new Set());
+  const [hoveredBlip, setHoveredBlip] = useState<{ value: string; x: number; y: number } | null>(null);
 
   // Calculate rotation speed based on block time
   // Full rotation (2π radians) should take blockTime seconds
@@ -87,6 +89,7 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
         hash: tx.transactionHash,
         size: blipSize,
         discovered: false, // Will be discovered when sweep passes
+        value: tx.value, // Store value for tooltip
       };
 
       radarTransactionsRef.current.push(newTransaction);
@@ -106,6 +109,43 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
     const centerX = width / 2;
     const centerY = height / 2;
     const radius = Math.min(width, height) / 2 - 20;
+
+    // Mouse move handler for hover detection
+    const handleMouseMove = (event: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = event.clientX - rect.left;
+      const mouseY = event.clientY - rect.top;
+
+      // Check if mouse is over any visible blip
+      let foundBlip: { value: string; x: number; y: number } | null = null;
+
+      for (const tx of radarTransactionsRef.current) {
+        if (!tx.discovered) continue; // Skip undiscovered blips
+
+        const blipX = centerX + Math.cos(tx.angle) * tx.distance * radius;
+        const blipY = centerY + Math.sin(tx.angle) * tx.distance * radius;
+        const distance = Math.sqrt(Math.pow(mouseX - blipX, 2) + Math.pow(mouseY - blipY, 2));
+
+        // Check if mouse is within blip radius (including glow)
+        if (distance <= tx.size * 2) {
+          foundBlip = {
+            value: tx.value,
+            x: event.clientX,
+            y: event.clientY,
+          };
+          break; // Take first match
+        }
+      }
+
+      setHoveredBlip(foundBlip);
+    };
+
+    const handleMouseLeave = () => {
+      setHoveredBlip(null);
+    };
+
+    canvas.addEventListener('mousemove', handleMouseMove);
+    canvas.addEventListener('mouseleave', handleMouseLeave);
 
     const drawRadar = () => {
       // Clear canvas with dark background
@@ -253,8 +293,20 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
+      canvas.removeEventListener('mousemove', handleMouseMove);
+      canvas.removeEventListener('mouseleave', handleMouseLeave);
     };
   }, [color, rotationSpeed, fadeSpeed]);
+
+  // Format USDC value for display
+  const formatUSDC = (valueString: string): string => {
+    try {
+      const valueInUSDC = Number(BigInt(valueString) / BigInt(1_000_000));
+      return `$${valueInUSDC.toLocaleString()} USDC`;
+    } catch {
+      return 'Unknown';
+    }
+  };
 
   return (
     <div className="flex flex-col items-center space-y-4">
@@ -263,12 +315,27 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
           ref={canvasRef}
           width={400}
           height={400}
-          className="rounded-lg border-2"
+          className="rounded-lg border-2 cursor-crosshair"
           style={{
             borderColor: color,
             boxShadow: `0 0 20px ${color}40`,
           }}
         />
+        
+        {/* Tooltip */}
+        {hoveredBlip && (
+          <div
+            className="fixed z-50 px-3 py-2 text-sm font-mono bg-black border-2 rounded-lg shadow-lg pointer-events-none"
+            style={{
+              borderColor: color,
+              color: color,
+              left: `${hoveredBlip.x + 10}px`,
+              top: `${hoveredBlip.y - 30}px`,
+            }}
+          >
+            {formatUSDC(hoveredBlip.value)}
+          </div>
+        )}
         <div
           className="absolute top-4 left-4 text-sm font-mono font-bold"
           style={{ color: color }}
