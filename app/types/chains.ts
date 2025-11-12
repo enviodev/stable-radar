@@ -70,7 +70,7 @@ export const CHAINS: Record<string, ChainConfig> = {
     usdcAddress: '0xb88339CB7199b77E23DB6E890353E22632Ba630f',
     hypersyncUrl: 'https://999.hypersync.xyz',
     blockTime: 1, // ~1 second per block
-    explorerUrl: 'https://explorer.hyperevm.org/tx/',
+    explorerUrl: 'https://hyperevmscan.io/tx/',
   },
   worldchain: {
     name: 'WORLDCHAIN',
@@ -81,14 +81,14 @@ export const CHAINS: Record<string, ChainConfig> = {
     blockTime: 2, // ~2 seconds per block
     explorerUrl: 'https://worldscan.org/tx/',
   },
-  sei: {
-    name: 'SEI',
-    chainId: 1329,
+  xdc: {
+    name: 'XDC',
+    chainId: 50,
     color: '#ffd700',
-    usdcAddress: '0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392',
-    hypersyncUrl: 'https://1329.hypersync.xyz',
-    blockTime: 0.4, // ~400ms per block
-    explorerUrl: 'https://seitrace.com/tx/',
+    usdcAddress: '0xfA2958CB79b0491CC627c1557F441eF849Ca8eb1',
+    hypersyncUrl: 'https://50.hypersync.xyz',
+    blockTime: 2, // ~2 seconds per block
+    explorerUrl: 'https://xdcscan.io/tx/',
   },
 };
 
