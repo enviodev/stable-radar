@@ -1,18 +1,32 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import Radar from './components/Radar';
 import DebugPanel from './components/DebugPanel';
 import { CHAINS } from './types/chains';
 import { useHypersync } from './hooks/useHypersync';
 
-export default function Home() {
+function HomeContent() {
   const chains = Object.values(CHAINS);
   const chainIds = chains.map((c) => c.chainId);
   const { chainData, isLoading, error } = useHypersync(chainIds);
+  const router = useRouter();
+  const searchParams = useSearchParams();
   
   // Threshold state (in USD)
-  const [threshold, setThreshold] = useState(1000);
+  const [threshold, setThreshold] = useState(0);
+  
+  // Network filter state - manage selected chain IDs
+  const [selectedChainIds, setSelectedChainIds] = useState<Set<number>>(() => {
+    // Initialize from URL query string or default to all
+    const networksParam = searchParams.get('networks');
+    if (networksParam) {
+      const networkIds = networksParam.split(',').map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+      return new Set(networkIds);
+    }
+    return new Set(chainIds);
+  });
 
   // Animated page title (radar sweep effect)
   useEffect(() => {
@@ -36,6 +50,50 @@ export default function Home() {
       document.title = '📡 STABLE RADAR';
     };
   }, []);
+
+  // Update URL when network selection changes
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const selectedIds = Array.from(selectedChainIds).sort((a, b) => a - b);
+    
+    if (selectedIds.length === chainIds.length) {
+      // All selected - remove param for cleaner URL
+      params.delete('networks');
+    } else if (selectedIds.length > 0) {
+      // Some selected - add to URL
+      params.set('networks', selectedIds.join(','));
+    } else {
+      // None selected - still show param (edge case)
+      params.set('networks', '');
+    }
+    
+    const newUrl = params.toString() ? `?${params.toString()}` : '/';
+    router.replace(newUrl, { scroll: false });
+  }, [selectedChainIds, chainIds, router]);
+
+  // Toggle network selection
+  const toggleNetwork = (chainId: number) => {
+    setSelectedChainIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(chainId)) {
+        next.delete(chainId);
+      } else {
+        next.add(chainId);
+      }
+      return next;
+    });
+  };
+
+  // Select/deselect all networks
+  const toggleAll = () => {
+    if (selectedChainIds.size === chainIds.length) {
+      // All selected - deselect all
+      setSelectedChainIds(new Set());
+    } else {
+      // Some or none selected - select all
+      setSelectedChainIds(new Set(chainIds));
+    }
+  };
 
   // Filter transactions by threshold
   const filterByThreshold = (transactions: any[]) => {
@@ -66,8 +124,43 @@ export default function Home() {
               </p>
             </header>
 
+            {/* Network Selection Filter */}
+            <div className="mb-8 p-4 bg-gray-900 border border-green-600 rounded-lg">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-green-400 font-mono text-sm font-bold">Network Filter</h3>
+                <button
+                  onClick={toggleAll}
+                  className="text-green-500 hover:text-green-400 font-mono text-xs underline"
+                >
+                  {selectedChainIds.size === chainIds.length ? 'Deselect All' : 'Select All'}
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {chains.map((chain) => {
+                  const isSelected = selectedChainIds.has(chain.chainId);
+                  return (
+                    <button
+                      key={chain.chainId}
+                      onClick={() => toggleNetwork(chain.chainId)}
+                      className={`px-3 py-1.5 rounded font-mono text-sm transition-all border-2 ${
+                        isSelected
+                          ? 'border-current opacity-100'
+                          : 'border-gray-700 opacity-40 hover:opacity-60'
+                      }`}
+                      style={{
+                        color: chain.color,
+                        backgroundColor: isSelected ? `${chain.color}15` : 'transparent',
+                      }}
+                    >
+                      {chain.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-8">
-          {chains.map((chain) => {
+          {chains.filter(chain => selectedChainIds.has(chain.chainId)).map((chain) => {
             const data = chainData[chain.chainId];
             const allTransactions = data?.transactions || [];
             const filteredTransactions = filterByThreshold(allTransactions);
@@ -99,7 +192,7 @@ export default function Home() {
                   Minimum Transfer Amount
                 </h3>
                 <div className="text-green-300 font-mono text-xl font-bold">
-                  ${threshold.toLocaleString()} USDC
+                  {threshold === 0 ? 'All Transfers' : `$${threshold.toLocaleString()} USDC`}
                 </div>
               </div>
               
@@ -113,7 +206,9 @@ export default function Home() {
                   onChange={(e) => setThreshold(Number(e.target.value))}
                   className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-green-500"
                   style={{
-                    background: `linear-gradient(to right, #22c55e 0%, #22c55e ${(threshold / 20000) * 100}%, #374151 ${(threshold / 20000) * 100}%, #374151 100%)`
+                    background: threshold === 0 
+                      ? 'linear-gradient(to right, #374151 0%, #374151 100%)'
+                      : `linear-gradient(to right, #22c55e 0%, #22c55e ${(threshold / 20000) * 100}%, #374151 ${(threshold / 20000) * 100}%, #374151 100%)`
                   }}
                 />
                 <div className="flex justify-between text-green-600 font-mono text-xs mt-1">
@@ -149,5 +244,17 @@ export default function Home() {
 
       <DebugPanel chainData={chainData} error={error} />
     </main>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={
+      <main className="min-h-screen bg-black p-8 flex items-center justify-center">
+        <div className="text-green-500 font-mono text-2xl animate-pulse">⟳ Loading...</div>
+      </main>
+    }>
+      <HomeContent />
+    </Suspense>
   );
 }
