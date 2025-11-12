@@ -129,7 +129,7 @@ export default function Home() {
             <footer className="text-center text-green-600 font-mono text-sm mt-12">
               <div className="mb-2">
                 <p className="text-xs text-green-700 mb-4">
-                  Monitoring: Ethereum • Base • Polygon • Arbitrum • Optimism • Sonic
+                  Monitoring: Ethereum • Base • Polygon • Arbitrum • Optimism • Sonic • HyperEVM • Worldchain • Sei
                 </p>
               </div>
               <p>

@@ -36,31 +36,60 @@ export const CHAINS: Record<string, ChainConfig> = {
     blockTime: 2, // ~2 seconds per block
     explorerUrl: 'https://polygonscan.com/tx/',
   },
-  // Temporarily disabled for optimization
-  // arbitrum: {
-  //   name: 'ARBITRUM',
-  //   chainId: 42161,
-  //   color: '#28a0f0',
-  //   usdcAddress: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
-  //   hypersyncUrl: 'https://42161.hypersync.xyz',
-  //   blockTime: 0.25, // ~250ms per block
-  // },
-  // optimism: {
-  //   name: 'OPTIMISM',
-  //   chainId: 10,
-  //   color: '#ff0420',
-  //   usdcAddress: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85',
-  //   hypersyncUrl: 'https://10.hypersync.xyz',
-  //   blockTime: 2, // ~2 seconds per block
-  // },
-  // sonic: {
-  //   name: 'SONIC',
-  //   chainId: 146,
-  //   color: '#00d4ff',
-  //   usdcAddress: '0x29219dd400f2Bf60E5a23d13Be72B486D4038894',
-  //   hypersyncUrl: 'https://146.hypersync.xyz',
-  //   blockTime: 1, // ~1 second per block
-  // },
+  arbitrum: {
+    name: 'ARBITRUM',
+    chainId: 42161,
+    color: '#28a0f0',
+    usdcAddress: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
+    hypersyncUrl: 'https://42161.hypersync.xyz',
+    blockTime: 0.25, // ~250ms per block
+    explorerUrl: 'https://arbiscan.io/tx/',
+  },
+  optimism: {
+    name: 'OPTIMISM',
+    chainId: 10,
+    color: '#ff0420',
+    usdcAddress: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85',
+    hypersyncUrl: 'https://10.hypersync.xyz',
+    blockTime: 2, // ~2 seconds per block
+    explorerUrl: 'https://optimistic.etherscan.io/tx/',
+  },
+  sonic: {
+    name: 'SONIC',
+    chainId: 146,
+    color: '#00d4ff',
+    usdcAddress: '0x29219dd400f2Bf60E5a23d13Be72B486D4038894',
+    hypersyncUrl: 'https://146.hypersync.xyz',
+    blockTime: 1, // ~1 second per block
+    explorerUrl: 'https://sonicscan.org/tx/',
+  },
+  hyperevm: {
+    name: 'HYPEREVM',
+    chainId: 999,
+    color: '#ff6b00',
+    usdcAddress: '0xb88339CB7199b77E23DB6E890353E22632Ba630f',
+    hypersyncUrl: 'https://999.hypersync.xyz',
+    blockTime: 1, // ~1 second per block
+    explorerUrl: 'https://explorer.hyperevm.org/tx/',
+  },
+  worldchain: {
+    name: 'WORLDCHAIN',
+    chainId: 480,
+    color: '#ff00ff',
+    usdcAddress: '0x79A02482A880bCe3F13E09da970dC34dB4cD24D1',
+    hypersyncUrl: 'https://480.hypersync.xyz',
+    blockTime: 2, // ~2 seconds per block
+    explorerUrl: 'https://worldscan.org/tx/',
+  },
+  sei: {
+    name: 'SEI',
+    chainId: 1329,
+    color: '#ffd700',
+    usdcAddress: '0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392',
+    hypersyncUrl: 'https://1329.hypersync.xyz',
+    blockTime: 0.4, // ~400ms per block
+    explorerUrl: 'https://seitrace.com/tx/',
+  },
 };
 
 export interface TransactionData {

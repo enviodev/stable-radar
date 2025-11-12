@@ -84,6 +84,9 @@ export async function GET(request: NextRequest) {
           fromBlock = Math.max(0, heightData.height - 10);
           console.log(`[${chain.name}] Starting from block ${fromBlock} (current height: ${heightData.height})`);
         }
+      } else {
+        const errorText = await heightResponse.text();
+        console.error(`[${chain.name}] Height query failed:`, heightResponse.status, errorText);
       }
       
       // Fallback: if we still don't have a block, use 0
@@ -150,7 +153,7 @@ export async function GET(request: NextRequest) {
     debugInfo.dataItems = data.data?.length || 0;
     debugInfo.totalLogs = data.data?.reduce((acc, item) => acc + item.logs.length, 0) || 0;
 
-    console.log(`[${chain.name}] Response: ${debugInfo.dataItems} items, ${debugInfo.totalLogs} logs, next_block: ${data.next_block}`);
+    console.log(`[${chain.name}] Response: ${debugInfo.dataItems} items, ${debugInfo.totalLogs} logs, next_block: ${data.next_block}, archive_height: ${data.archive_height}`);
 
     // Update last seen block
     if (data.next_block) {
