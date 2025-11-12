@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Radar from './components/Radar';
 import DebugPanel from './components/DebugPanel';
 import { CHAINS } from './types/chains';
@@ -13,6 +13,29 @@ export default function Home() {
   
   // Threshold state (in USD)
   const [threshold, setThreshold] = useState(1000);
+
+  // Animated page title (radar sweep effect)
+  useEffect(() => {
+    const frames = [
+      '📡 STABLE RADAR',
+      '📡● STABLE RADAR',
+      '📡◐ STABLE RADAR', 
+      '📡◓ STABLE RADAR',
+      '📡◑ STABLE RADAR',
+      '📡◒ STABLE RADAR',
+    ];
+    let currentFrame = 0;
+
+    const interval = setInterval(() => {
+      document.title = frames[currentFrame];
+      currentFrame = (currentFrame + 1) % frames.length;
+    }, 500); // 500ms per frame
+
+    return () => {
+      clearInterval(interval);
+      document.title = '📡 STABLE RADAR';
+    };
+  }, []);
 
   // Filter transactions by threshold
   const filterByThreshold = (transactions: any[]) => {
@@ -35,7 +58,7 @@ export default function Home() {
             </div>
 
             <header className="text-center mb-12">
-              <h1 className="text-5xl font-bold text-green-400 mb-4 font-mono tracking-wider">
+              <h1 className="text-6xl font-black text-green-400 mb-4 tracking-[0.3em] font-[family-name:var(--font-orbitron)]">
                 STABLE RADAR
               </h1>
               <p className="text-xl text-green-300 font-mono">
