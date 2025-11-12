@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 
 interface RadarProps {
   chainName: string;
@@ -34,6 +34,33 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
   const animationFrameRef = useRef<number | undefined>(undefined);
   const seenHashesRef = useRef<Set<string>>(new Set());
   const [hoveredBlip, setHoveredBlip] = useState<{ value: string; x: number; y: number; hash: string } | null>(null);
+  
+  // Track component mount time for initial loading state
+  const [isInitializing, setIsInitializing] = useState(true);
+  
+  // Track block-level statistics for calculating average
+  const blockStatsRef = useRef<{
+    samples: number[]; // Array of USDC/s rates for each block period
+    totalVolume: number; // Cumulative total volume
+    totalTime: number; // Cumulative total time in seconds
+    lastProcessedTxHash: string | null; // Track last processed tx to avoid duplicates
+  }>({
+    samples: [],
+    totalVolume: 0,
+    totalTime: 0,
+    lastProcessedTxHash: null,
+  });
+
+  const [currentAverage, setCurrentAverage] = useState<number>(0);
+  
+  // Check if we're past the 5 second initialization period
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsInitializing(false);
+    }, 5000); // 5 seconds
+    
+    return () => clearTimeout(timer);
+  }, []);
 
   // Calculate rotation speed based on block time
   // Full rotation (2π radians) should take blockTime seconds
@@ -48,7 +75,7 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
 
   // Calculate blip size based on USDC value
   // Uses logarithmic scaling to handle wide range of values
-  const calculateBlipSize = (valueString: string): number => {
+  const calculateBlipSize = useCallback((valueString: string): number => {
     try {
       // Convert from 6 decimals to USD
       const valueInUSDC = Number(BigInt(valueString) / BigInt(1_000_000));
@@ -68,10 +95,18 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
     } catch {
       return 3; // Default size if parsing fails
     }
-  };
+  }, []);
 
-  // Add new transactions to radar
+  // Add new transactions to radar and update cumulative average
   useEffect(() => {
+    if (transactions.length === 0) return;
+
+    // Process new transactions
+    let newVolume = 0;
+    let newTxCount = 0;
+    let oldestTimestamp: number | null = null;
+    let newestTimestamp: number | null = null;
+
     transactions.forEach((tx) => {
       // Skip if already displayed
       if (seenHashesRef.current.has(tx.transactionHash)) {
@@ -95,8 +130,46 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
 
       radarTransactionsRef.current.push(newTransaction);
       seenHashesRef.current.add(tx.transactionHash);
+
+      // Track for average calculation
+      try {
+        const valueInUSDC = Number(BigInt(tx.value) / BigInt(1_000_000));
+        newVolume += valueInUSDC;
+        newTxCount++;
+        
+        if (oldestTimestamp === null || tx.timestamp < oldestTimestamp) {
+          oldestTimestamp = tx.timestamp;
+        }
+        if (newestTimestamp === null || tx.timestamp > newestTimestamp) {
+          newestTimestamp = tx.timestamp;
+        }
+      } catch (e) {
+        // Skip invalid values
+      }
     });
-  }, [transactions]);
+
+    // Update block statistics if we have new transactions
+    if (newTxCount > 0 && oldestTimestamp !== null && newestTimestamp !== null) {
+      const timeSpan = Math.max(newestTimestamp - oldestTimestamp, blockTime);
+      const rateForThisPeriod = newVolume / timeSpan;
+      
+      // Add this sample to our running statistics
+      blockStatsRef.current.samples.push(rateForThisPeriod);
+      blockStatsRef.current.totalVolume += newVolume;
+      blockStatsRef.current.totalTime += timeSpan;
+      
+      // Keep only last 100 samples to prevent memory bloat
+      if (blockStatsRef.current.samples.length > 100) {
+        blockStatsRef.current.samples.shift();
+      }
+      
+      // Calculate cumulative average (mean of all sample rates)
+      const average = blockStatsRef.current.samples.reduce((sum, rate) => sum + rate, 0) 
+                      / blockStatsRef.current.samples.length;
+      
+      setCurrentAverage(average);
+    }
+  }, [transactions, blockTime, calculateBlipSize]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -338,6 +411,27 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
     }
   };
 
+  // Format the current average for display
+  const formatVolumePerSecond = (): string | null => {
+    // During initialization period, return null to show loader
+    if (isInitializing) {
+      return null;
+    }
+
+    // Format based on magnitude
+    if (currentAverage >= 1_000_000) {
+      return `${(currentAverage / 1_000_000).toFixed(1)}M`;
+    } else if (currentAverage >= 1_000) {
+      return `${(currentAverage / 1_000).toFixed(1)}k`;
+    } else if (currentAverage >= 1) {
+      return currentAverage.toFixed(0);
+    } else if (currentAverage > 0) {
+      return currentAverage.toFixed(1);
+    } else {
+      return '0';
+    }
+  };
+
   return (
     <div className="flex flex-col items-center">
       <div className="relative">
@@ -380,10 +474,21 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
           {blockTime}s/block
         </div>
         <div
-          className="absolute bottom-4 right-4 text-2xl font-mono font-bold"
+          className="absolute bottom-4 right-4 font-mono font-bold"
           style={{ color: color }}
+          title={`Average USDC transfer rate (${blockStatsRef.current.samples.length} samples)`}
         >
-          {transactionCount.toLocaleString()}
+          {(() => {
+            const volumeDisplay = formatVolumePerSecond();
+            return volumeDisplay === null ? (
+              <div className="text-2xl animate-pulse">⟳</div>
+            ) : (
+              <>
+                <div className="text-2xl">{volumeDisplay}</div>
+                <div className="text-xs opacity-70 text-right">USDC/s</div>
+              </>
+            );
+          })()}
         </div>
       </div>
     </div>
