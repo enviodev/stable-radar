@@ -339,7 +339,7 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
   };
 
   return (
-    <div className="flex flex-col items-center space-y-4">
+    <div className="flex flex-col items-center">
       <div className="relative">
         <canvas
           ref={canvasRef}
@@ -385,12 +385,6 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
         >
           {transactionCount.toLocaleString()}
         </div>
-      </div>
-      <div
-        className="text-lg font-mono uppercase tracking-wider"
-        style={{ color: color }}
-      >
-        {chainName} Network
       </div>
     </div>
   );
