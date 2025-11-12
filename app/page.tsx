@@ -49,19 +49,20 @@ export default function Home() {
             const totalCount = data?.totalCount || 0;
 
             return (
-              <div key={chain.chainId} className="flex justify-center">
-                <Radar
-                  chainName={chain.name}
-                  transactionCount={totalCount}
-                  color={chain.color}
-                  blockTime={chain.blockTime}
-                  transactions={filteredTransactions.map((tx) => ({
-                    transactionHash: tx.transactionHash,
-                    timestamp: tx.timestamp,
-                    value: tx.value, // Pass value for size calculation
-                  }))}
-                />
-              </div>
+                  <div key={chain.chainId} className="flex justify-center">
+                    <Radar
+                      chainName={chain.name}
+                      transactionCount={totalCount}
+                      color={chain.color}
+                      blockTime={chain.blockTime}
+                      explorerUrl={chain.explorerUrl}
+                      transactions={filteredTransactions.map((tx) => ({
+                        transactionHash: tx.transactionHash,
+                        timestamp: tx.timestamp,
+                        value: tx.value, // Pass value for size calculation
+                      }))}
+                    />
+                  </div>
             );
           })}
         </div>

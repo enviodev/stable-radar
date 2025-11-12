@@ -7,6 +7,7 @@ interface RadarProps {
   transactionCount: number;
   color?: string;
   blockTime: number; // Block time in seconds
+  explorerUrl: string; // Block explorer base URL
   transactions: Array<{
     transactionHash: string;
     timestamp: number;
@@ -25,14 +26,14 @@ interface RadarTransaction {
   value: string; // USDC value for tooltip
 }
 
-export default function Radar({ chainName, transactionCount, color = '#00ff00', blockTime, transactions }: RadarProps) {
+export default function Radar({ chainName, transactionCount, color = '#00ff00', blockTime, explorerUrl, transactions }: RadarProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const radarTransactionsRef = useRef<RadarTransaction[]>([]);
   const sweepAngleRef = useRef(0);
   const previousSweepAngleRef = useRef(0);
   const animationFrameRef = useRef<number | undefined>(undefined);
   const seenHashesRef = useRef<Set<string>>(new Set());
-  const [hoveredBlip, setHoveredBlip] = useState<{ value: string; x: number; y: number } | null>(null);
+  const [hoveredBlip, setHoveredBlip] = useState<{ value: string; x: number; y: number; hash: string } | null>(null);
 
   // Calculate rotation speed based on block time
   // Full rotation (2π radians) should take blockTime seconds
@@ -117,7 +118,7 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
       const mouseY = event.clientY - rect.top;
 
       // Check if mouse is over any visible blip
-      let foundBlip: { value: string; x: number; y: number } | null = null;
+      let foundBlip: { value: string; x: number; y: number; hash: string } | null = null;
 
       for (const tx of radarTransactionsRef.current) {
         if (!tx.discovered) continue; // Skip undiscovered blips
@@ -132,6 +133,7 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
             value: tx.value,
             x: event.clientX,
             y: event.clientY,
+            hash: tx.hash,
           };
           break; // Take first match
         }
@@ -144,8 +146,32 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
       setHoveredBlip(null);
     };
 
+    // Click handler to open block explorer
+    const handleClick = (event: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = event.clientX - rect.left;
+      const mouseY = event.clientY - rect.top;
+
+      // Check if click is on any visible blip
+      for (const tx of radarTransactionsRef.current) {
+        if (!tx.discovered) continue; // Skip undiscovered blips
+
+        const blipX = centerX + Math.cos(tx.angle) * tx.distance * radius;
+        const blipY = centerY + Math.sin(tx.angle) * tx.distance * radius;
+        const distance = Math.sqrt(Math.pow(mouseX - blipX, 2) + Math.pow(mouseY - blipY, 2));
+
+        // Check if click is within blip radius (including glow)
+        if (distance <= tx.size * 2) {
+          // Open block explorer in new tab
+          window.open(`${explorerUrl}${tx.hash}`, '_blank', 'noopener,noreferrer');
+          break; // Only open first match
+        }
+      }
+    };
+
     canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mouseleave', handleMouseLeave);
+    canvas.addEventListener('click', handleClick);
 
     const drawRadar = () => {
       // Clear canvas with dark background
@@ -271,10 +297,13 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
       sweepAngleRef.current += rotationSpeed;
 
       // Update transactions (fade them out based on block time)
+      // Don't fade the currently hovered blip
+      const hoveredHash = hoveredBlip?.hash;
       radarTransactionsRef.current = radarTransactionsRef.current
         .map((tx) => ({
           ...tx,
-          fadeProgress: tx.fadeProgress + fadeSpeed,
+          // Don't increase fade progress for hovered blip
+          fadeProgress: tx.hash === hoveredHash ? tx.fadeProgress : tx.fadeProgress + fadeSpeed,
         }))
         .filter((tx) => tx.fadeProgress < 1);
 
@@ -295,8 +324,9 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
       }
       canvas.removeEventListener('mousemove', handleMouseMove);
       canvas.removeEventListener('mouseleave', handleMouseLeave);
+      canvas.removeEventListener('click', handleClick);
     };
-  }, [color, rotationSpeed, fadeSpeed]);
+  }, [color, rotationSpeed, fadeSpeed, hoveredBlip, explorerUrl]);
 
   // Format USDC value for display
   const formatUSDC = (valueString: string): string => {
@@ -315,7 +345,7 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
           ref={canvasRef}
           width={400}
           height={400}
-          className="rounded-lg border-2 cursor-crosshair"
+          className="rounded-lg border-2 cursor-crosshair hover:cursor-pointer"
           style={{
             borderColor: color,
             boxShadow: `0 0 20px ${color}40`,
