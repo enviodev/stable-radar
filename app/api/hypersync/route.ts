@@ -60,16 +60,8 @@ export async function GET(request: NextRequest) {
     // Get the last block we queried, or query only the latest blocks on first run
     let fromBlock = lastSeenBlocks[chain.chainId];
     
-    // For the first query, get the archive height first
+    // For the first query, get the CURRENT height from the height endpoint
     if (!fromBlock) {
-      // Make a quick query to get the current archive height
-      const heightQuery = {
-        from_block: 0,
-        to_block: 1,
-        logs: [],
-        field_selection: { block: ['number'] },
-      };
-      
       // Build headers with API key for height query
       const heightHeaders: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -79,18 +71,18 @@ export async function GET(request: NextRequest) {
         heightHeaders['Authorization'] = `Bearer ${apiKey}`;
       }
       
-      const heightResponse = await fetch(`${chain.hypersyncUrl}/query`, {
-        method: 'POST',
+      // Use the dedicated height endpoint to get the current block height
+      const heightResponse = await fetch(`${chain.hypersyncUrl}/height`, {
+        method: 'GET',
         headers: heightHeaders,
-        body: JSON.stringify(heightQuery),
       });
       
       if (heightResponse.ok) {
-        const heightData: HypersyncResponse = await heightResponse.json();
-        if (heightData.archive_height) {
-          // Start from 10000 blocks ago to get recent activity
-          fromBlock = Math.max(0, heightData.archive_height - 10000);
-          console.log(`[${chain.name}] Starting from block ${fromBlock} (archive height: ${heightData.archive_height})`);
+        const heightData = await heightResponse.json();
+        if (heightData.height) {
+          // Start from current height - 10 blocks for safety (to catch very recent transfers)
+          fromBlock = Math.max(0, heightData.height - 10);
+          console.log(`[${chain.name}] Starting from block ${fromBlock} (current height: ${heightData.height})`);
         }
       }
       
