@@ -21,12 +21,14 @@ interface RadarTransaction {
   fadeProgress: number;
   hash: string;
   size: number; // Circle radius in pixels
+  discovered: boolean; // Whether sweep has passed over it
 }
 
 export default function Radar({ chainName, transactionCount, color = '#00ff00', blockTime, transactions }: RadarProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const radarTransactionsRef = useRef<RadarTransaction[]>([]);
   const sweepAngleRef = useRef(0);
+  const previousSweepAngleRef = useRef(0);
   const animationFrameRef = useRef<number | undefined>(undefined);
   const seenHashesRef = useRef<Set<string>>(new Set());
 
@@ -76,7 +78,7 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
       // Calculate size based on value
       const blipSize = calculateBlipSize(tx.value);
 
-      // Add to radar
+      // Add to radar (initially undiscovered)
       const newTransaction: RadarTransaction = {
         angle: Math.random() * Math.PI * 2,
         distance: 0.3 + Math.random() * 0.6,
@@ -84,6 +86,7 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
         fadeProgress: 0,
         hash: tx.transactionHash,
         size: blipSize,
+        discovered: false, // Will be discovered when sweep passes
       };
 
       radarTransactionsRef.current.push(newTransaction);
@@ -133,25 +136,53 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
 
       ctx.globalAlpha = 1;
 
-      // Draw transactions (blips) with variable sizes
+      // Update discovery status and draw transactions (blips)
+      const currentSweepAngle = sweepAngleRef.current % (Math.PI * 2);
+      const previousSweepAngle = previousSweepAngleRef.current % (Math.PI * 2);
+      
       radarTransactionsRef.current.forEach((tx) => {
-        const x = centerX + Math.cos(tx.angle) * tx.distance * radius;
-        const y = centerY + Math.sin(tx.angle) * tx.distance * radius;
+        // Check if sweep has just crossed this blip's angle
+        if (!tx.discovered) {
+          const blipAngle = tx.angle;
+          
+          // Check if blip angle is between previous and current sweep position
+          // This detects when sweep has just crossed the blip
+          let crossed = false;
+          
+          // Handle normal case (no wraparound)
+          if (currentSweepAngle >= previousSweepAngle) {
+            // Sweep moved forward normally
+            crossed = (blipAngle >= previousSweepAngle && blipAngle <= currentSweepAngle);
+          } else {
+            // Wraparound case: sweep crossed from 2π to 0
+            crossed = (blipAngle >= previousSweepAngle || blipAngle <= currentSweepAngle);
+          }
+          
+          if (crossed) {
+            tx.discovered = true;
+          }
+        }
         
-        const alpha = Math.max(0, 1 - tx.fadeProgress);
-        ctx.globalAlpha = alpha;
-        ctx.fillStyle = color;
-        
-        // Main blip with variable size
-        ctx.beginPath();
-        ctx.arc(x, y, tx.size, 0, Math.PI * 2);
-        ctx.fill();
+        // Only draw if discovered
+        if (tx.discovered) {
+          const x = centerX + Math.cos(tx.angle) * tx.distance * radius;
+          const y = centerY + Math.sin(tx.angle) * tx.distance * radius;
+          
+          const alpha = Math.max(0, 1 - tx.fadeProgress);
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = color;
+          
+          // Main blip with variable size
+          ctx.beginPath();
+          ctx.arc(x, y, tx.size, 0, Math.PI * 2);
+          ctx.fill();
 
-        // Glow effect (2x the main size, half alpha)
-        ctx.globalAlpha = alpha * 0.5;
-        ctx.beginPath();
-        ctx.arc(x, y, tx.size * 2, 0, Math.PI * 2);
-        ctx.fill();
+          // Glow effect (2x the main size, half alpha)
+          ctx.globalAlpha = alpha * 0.5;
+          ctx.beginPath();
+          ctx.arc(x, y, tx.size * 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
       });
 
       ctx.globalAlpha = 1;
@@ -161,30 +192,42 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
       ctx.translate(centerX, centerY);
       ctx.rotate(sweepAngleRef.current);
 
-      // Create gradient for sweep line
-      const gradient = ctx.createLinearGradient(0, 0, radius, 0);
-      gradient.addColorStop(0, color);
-      gradient.addColorStop(0.5, color + '80');
-      gradient.addColorStop(1, color + '00');
-
-      ctx.strokeStyle = gradient;
+      // Draw the bright leading edge line (at angle 0, pointing right)
+      ctx.strokeStyle = color;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(0, 0);
       ctx.lineTo(radius, 0);
       ctx.stroke();
 
-      // Draw sweep cone
+      // Draw sweep cone (trail behind the line, going counterclockwise)
+      // This creates the fade effect trailing the bright line
       ctx.fillStyle = color + '15';
       ctx.beginPath();
       ctx.moveTo(0, 0);
-      ctx.arc(0, 0, radius, 0, Math.PI / 6);
+      // Arc from -30° to 0° (counterclockwise trail behind the line)
+      ctx.arc(0, 0, radius, -Math.PI / 6, 0);
+      ctx.lineTo(0, 0);
+      ctx.fill();
+
+      // Add gradient overlay for smoother fade
+      const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
+      gradient.addColorStop(0, color + '20');
+      gradient.addColorStop(0.8, color + '10');
+      gradient.addColorStop(1, color + '00');
+      
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, radius, -Math.PI / 6, 0);
       ctx.lineTo(0, 0);
       ctx.fill();
 
       ctx.restore();
 
       // Update sweep angle based on block time
+      // Store previous angle before updating
+      previousSweepAngleRef.current = sweepAngleRef.current;
       sweepAngleRef.current += rotationSpeed;
 
       // Update transactions (fade them out based on block time)
