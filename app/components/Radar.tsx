@@ -37,6 +37,7 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
   const previousSweepAngleRef = useRef(0);
   const animationFrameRef = useRef<number | undefined>(undefined);
   const seenHashesRef = useRef<Set<string>>(new Set());
+  const lastFrameTimeRef = useRef<number>(0);
   const [hoveredBlip, setHoveredBlip] = useState<{ value: string; x: number; y: number; hash: string } | null>(null);
   
   // Track component mount time for initial loading state
@@ -66,16 +67,14 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
     return () => clearTimeout(timer);
   }, []);
 
-  // Calculate rotation speed based on block time
+  // Calculate rotation speed per second (radians per second)
   // Full rotation (2π radians) should take blockTime seconds
-  // At 60fps: rotationSpeed = (2π) / (blockTime * 60 frames)
-  const rotationSpeed = (Math.PI * 2) / (blockTime * 60);
+  const rotationSpeedPerSecond = (Math.PI * 2) / blockTime;
 
-  // Calculate fade speed based on block time
+  // Calculate fade speed per second
   // Blips should persist for one full block time, then fade out
   // fadeProgress goes from 0 to 1 over blockTime seconds
-  // At 60fps: fadeSpeed = 1.0 / (blockTime * 60 frames)
-  const fadeSpeed = 1.0 / (blockTime * 60);
+  const fadeSpeedPerSecond = 1.0 / blockTime;
 
   // Calculate blip size based on USDC value
   // Uses logarithmic scaling to handle wide range of values
@@ -250,7 +249,14 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
     canvas.addEventListener('mouseleave', handleMouseLeave);
     canvas.addEventListener('click', handleClick);
 
-    const drawRadar = () => {
+    const drawRadar = (currentTime: number) => {
+      // Calculate delta time in seconds
+      if (lastFrameTimeRef.current === 0) {
+        lastFrameTimeRef.current = currentTime;
+      }
+      const deltaTime = (currentTime - lastFrameTimeRef.current) / 1000; // Convert ms to seconds
+      lastFrameTimeRef.current = currentTime;
+
       // Clear canvas with dark background
       ctx.fillStyle = '#000a00';
       ctx.fillRect(0, 0, width, height);
@@ -368,19 +374,19 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
 
       ctx.restore();
 
-      // Update sweep angle based on block time
+      // Update sweep angle based on elapsed time
       // Store previous angle before updating
       previousSweepAngleRef.current = sweepAngleRef.current;
-      sweepAngleRef.current += rotationSpeed;
+      sweepAngleRef.current += rotationSpeedPerSecond * deltaTime;
 
-      // Update transactions (fade them out based on block time)
+      // Update transactions (fade them out based on elapsed time)
       // Don't fade the currently hovered blip
       const hoveredHash = hoveredBlip?.hash;
       radarTransactionsRef.current = radarTransactionsRef.current
         .map((tx) => ({
           ...tx,
           // Don't increase fade progress for hovered blip
-          fadeProgress: tx.hash === hoveredHash ? tx.fadeProgress : tx.fadeProgress + fadeSpeed,
+          fadeProgress: tx.hash === hoveredHash ? tx.fadeProgress : tx.fadeProgress + (fadeSpeedPerSecond * deltaTime),
         }))
         .filter((tx) => tx.fadeProgress < 1);
 
@@ -393,7 +399,8 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
       animationFrameRef.current = requestAnimationFrame(drawRadar);
     };
 
-    drawRadar();
+    // Start animation with timestamp
+    animationFrameRef.current = requestAnimationFrame(drawRadar);
 
     return () => {
       if (animationFrameRef.current) {
@@ -402,8 +409,10 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
       canvas.removeEventListener('mousemove', handleMouseMove);
       canvas.removeEventListener('mouseleave', handleMouseLeave);
       canvas.removeEventListener('click', handleClick);
+      // Reset frame time on cleanup
+      lastFrameTimeRef.current = 0;
     };
-  }, [color, rotationSpeed, fadeSpeed, hoveredBlip, explorerUrl]);
+  }, [color, rotationSpeedPerSecond, fadeSpeedPerSecond, hoveredBlip, explorerUrl]);
 
   // Format USDC value for display
   const formatUSDC = (valueString: string): string => {
