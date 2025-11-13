@@ -68,13 +68,14 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
   }, []);
 
   // Calculate rotation speed per second (radians per second)
-  // Full rotation (2π radians) should take blockTime seconds
-  const rotationSpeedPerSecond = (Math.PI * 2) / blockTime;
+  // Use a minimum rotation time of 2 seconds for visual comfort
+  // This prevents very fast chains (like Arbitrum) from spinning too quickly
+  const visualRotationTime = Math.max(blockTime, 2);
+  const rotationSpeedPerSecond = (Math.PI * 2) / visualRotationTime;
 
   // Calculate fade speed per second
-  // Blips should persist for one full block time, then fade out
-  // fadeProgress goes from 0 to 1 over blockTime seconds
-  const fadeSpeedPerSecond = 1.0 / blockTime;
+  // Blips should persist for the visual rotation time
+  const fadeSpeedPerSecond = 1.0 / visualRotationTime;
 
   // Calculate blip size based on USDC value
   // Uses logarithmic scaling to handle wide range of values
