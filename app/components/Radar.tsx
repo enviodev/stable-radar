@@ -26,7 +26,11 @@ interface RadarTransaction {
   value: string; // USDC value for tooltip
 }
 
-export default function Radar({ chainName, transactionCount, color = '#00ff00', blockTime, explorerUrl, transactions }: RadarProps) {
+interface RadarPropsWithSize extends RadarProps {
+  size?: number; // Canvas size in pixels
+}
+
+export default function Radar({ chainName, transactionCount, color = '#00ff00', blockTime, explorerUrl, transactions, size = 400 }: RadarPropsWithSize) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const radarTransactionsRef = useRef<RadarTransaction[]>([]);
   const sweepAngleRef = useRef(0);
@@ -433,12 +437,15 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
   };
 
   return (
-    <div className="flex flex-col items-center">
-      <div className="relative">
+    <div className="flex justify-center">
+      <div className="relative" style={{ 
+        width: `${size}px`, 
+        height: `${size}px`,
+      }}>
         <canvas
           ref={canvasRef}
-          width={400}
-          height={400}
+          width={size}
+          height={size}
           className="rounded-lg border-2 cursor-crosshair hover:cursor-pointer"
           style={{
             borderColor: color,

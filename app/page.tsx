@@ -118,7 +118,7 @@ function HomeContent() {
             <header className="text-center mb-12">
               <h1 className="text-6xl font-black text-green-400 mb-4 tracking-[0.3em] font-[family-name:var(--font-orbitron)]">
                 STABLE RADAR
-              </h1>
+          </h1>
               <p className="text-xl text-green-300 font-mono">
                 Real-time USDC Transaction Monitoring Across Multiple Chains
               </p>
@@ -159,21 +159,36 @@ function HomeContent() {
               </div>
             </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-8">
+        <div className={`grid gap-8 mb-8 ${
+          selectedChainIds.size === 1 
+            ? 'grid-cols-1' // Single network
+            : selectedChainIds.size <= 4 
+              ? 'grid-cols-1 md:grid-cols-2' // 2-4 networks: 2x2 grid
+              : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3' // 5+ networks: 3 columns
+        }`}>
           {chains.filter(chain => selectedChainIds.has(chain.chainId)).map((chain) => {
             const data = chainData[chain.chainId];
             const allTransactions = data?.transactions || [];
             const filteredTransactions = filterByThreshold(allTransactions);
             const totalCount = data?.totalCount || 0;
 
+            // Determine radar size based on layout
+            const radarSize = selectedChainIds.size === 1 
+              ? 600  // Single network: large
+              : selectedChainIds.size <= 4 
+                ? 450  // 2-4 networks: medium
+                : 380; // 5+ networks: smaller
+
             return (
-                  <div key={chain.chainId} className="flex justify-center">
+                  <div key={`${chain.chainId}-${radarSize}`} className="flex items-center justify-center">
                     <Radar
+                      key={`radar-${chain.chainId}-${radarSize}`}
                       chainName={chain.name}
                       transactionCount={totalCount}
                       color={chain.color}
                       blockTime={chain.blockTime}
                       explorerUrl={chain.explorerUrl}
+                      size={radarSize}
                       transactions={filteredTransactions.map((tx) => ({
                         transactionHash: tx.transactionHash,
                         timestamp: tx.timestamp,
@@ -231,16 +246,16 @@ function HomeContent() {
                 Powered by{' '}
                 <a
                   href="https://envio.dev"
-                  target="_blank"
-                  rel="noopener noreferrer"
+            target="_blank"
+            rel="noopener noreferrer"
                   className="text-green-500 hover:text-green-400 underline"
-                >
+          >
                   ENVIO
-                </a>
+          </a>
                 {' '}Hypersync
               </p>
             </footer>
-      </div>
+        </div>
 
       <DebugPanel chainData={chainData} error={error} />
     </main>
