@@ -95,7 +95,7 @@ export const CHAINS: Record<string, ChainConfig> = {
     chainId: 41454,
     color: '#00ffcc',
     usdcAddress: '0x754704Bc059F8C67012fEd69BC8A327a5aafb603',
-    hypersyncUrl: 'https://damon.hypersync.xyz',
+    hypersyncUrl: 'https://monad.hypersync.xyz',
     blockTime: 0.4, // ~400ms per block
     explorerUrl: 'https://monadscan.com/tx/',
   },
