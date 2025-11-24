@@ -143,8 +143,8 @@ function HomeContent() {
                   key={chain.chainId}
                   onClick={() => toggleNetwork(chain.chainId)}
                   className={`px-3 py-1.5 rounded font-mono text-sm transition-all border-2 ${isSelected
-                      ? 'border-current opacity-100'
-                      : 'border-gray-700 opacity-40 hover:opacity-60'
+                    ? 'border-current opacity-100'
+                    : 'border-gray-700 opacity-40 hover:opacity-60'
                     }`}
                   style={{
                     color: chain.color,
@@ -159,10 +159,10 @@ function HomeContent() {
         </div>
 
         <div className={`grid gap-8 mb-8 ${selectedChainIds.size === 1
-            ? 'grid-cols-1' // Single network
-            : selectedChainIds.size <= 4
-              ? 'grid-cols-1 md:grid-cols-2' // 2-4 networks: 2x2 grid
-              : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3' // 5+ networks: 3 columns
+          ? 'grid-cols-1' // Single network
+          : selectedChainIds.size <= 4
+            ? 'grid-cols-1 md:grid-cols-2' // 2-4 networks: 2x2 grid
+            : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3' // 5+ networks: 3 columns
           }`}>
           {chains.filter(chain => selectedChainIds.has(chain.chainId)).map((chain) => {
             const data = chainData[chain.chainId];
@@ -234,12 +234,12 @@ function HomeContent() {
           </div>
         </div>
 
-        <footer className="text-center text-green-600 font-mono text-sm mt-12">
-          <div className="mb-2">
-            <p className="text-xs text-green-700 mb-4">
-              Monitoring: Ethereum • Base • Polygon • Arbitrum • Optimism • Sonic • HyperEVM • Worldchain • XDC
-            </p>
-          </div>
+            <footer className="text-center text-green-600 font-mono text-sm mt-12">
+              <div className="mb-2">
+                <p className="text-xs text-green-700 mb-4">
+                  Monitoring: Ethereum • Base • Polygon • Arbitrum • Optimism • Sonic • HyperEVM • Worldchain • XDC • Monad
+                </p>
+              </div>
           <p>
             Powered by{' '}
             <a
