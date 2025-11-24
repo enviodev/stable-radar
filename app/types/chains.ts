@@ -92,7 +92,7 @@ export const CHAINS: Record<string, ChainConfig> = {
   },
   monad: {
     name: 'MONAD',
-    chainId: 41454,
+    chainId: 143,
     color: '#00ffcc',
     usdcAddress: '0x754704Bc059F8C67012fEd69BC8A327a5aafb603',
     hypersyncUrl: 'https://monad.hypersync.xyz',
