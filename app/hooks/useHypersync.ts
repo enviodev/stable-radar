@@ -16,7 +16,7 @@ const MAX_TRANSACTIONS_PER_CHAIN = 100;
 const MAX_SEEN_PER_CHAIN = 10000;
 
 // Matches the API's shared cache window, so polling faster would only return cached data
-const POLL_INTERVAL = 10000;
+const POLL_INTERVAL = 20000;
 
 // Fetched transfers are replayed block by block at the chain's own pace, so the
 // radar keeps moving between polls instead of arriving in one burst
@@ -33,6 +33,8 @@ export function useHypersync(chainIds: number[]) {
   const seenRef = useRef<Record<number, Set<string>>>({});
   const countRef = useRef<Record<number, number>>({});
   const queueRef = useRef<Record<number, TransactionData[]>>({});
+  // Next block to replay per chain, so blocks without transfers still take real time
+  const cursorRef = useRef<Record<number, number>>({});
   const failingRef = useRef<Set<number>>(new Set());
 
   useEffect(() => {
@@ -85,6 +87,10 @@ export function useHypersync(chainIds: number[]) {
         const head = queue.length ? queue[queue.length - 1].blockNumber : 0;
         const oldestAllowed = head - Math.ceil((2 * POLL_INTERVAL) / 1000 / blockTime);
         queueRef.current[chainId] = queue.filter((tx) => tx.blockNumber > oldestAllowed);
+        const cursor = cursorRef.current[chainId];
+        if (queueRef.current[chainId].length && (cursor === undefined || cursor <= oldestAllowed)) {
+          cursorRef.current[chainId] = queueRef.current[chainId][0].blockNumber;
+        }
 
         setIsLoading(false);
       } catch (err) {
@@ -97,12 +103,16 @@ export function useHypersync(chainIds: number[]) {
     // Release the next block(s) of queued transfers for one chain
     const releaseNextBlocks = (chainId: number, blocksPerTick: number) => {
       const queue = queueRef.current[chainId];
-      if (!queue.length) return;
+      const cursor = cursorRef.current[chainId];
+      if (!queue.length || cursor === undefined) return;
 
-      const lastBlock = queue[0].blockNumber + blocksPerTick - 1;
+      // Replay stops at the newest fetched block and waits for the next poll
+      const lastBlock = Math.min(cursor + blocksPerTick - 1, queue[queue.length - 1].blockNumber);
+      cursorRef.current[chainId] = lastBlock + 1;
       const cut = queue.findIndex((tx) => tx.blockNumber > lastBlock);
       const released = cut === -1 ? queue : queue.slice(0, cut);
       queueRef.current[chainId] = cut === -1 ? [] : queue.slice(cut);
+      if (!released.length) return;
 
       const now = Date.now();
       const stamped = released.map((tx) => ({ ...tx, timestamp: now }));

@@ -16,15 +16,20 @@ const TRANSFER_EVENT_ABI = {
 const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 
 // Every visitor shares the same response per chain for this long, so HyperSync
-// load stays flat no matter how many people have the page open.
-const CACHE_SECONDS = 10;
+// load stays flat no matter how many people have the page open: ten chains at
+// one call each per 20s is 30 calls a minute.
+const CACHE_SECONDS = 20;
 
 // Each response covers the most recent transfers in this window. Clients
 // dedupe by transaction hash, so overlapping windows are fine.
 const LOOKBACK_SECONDS = 15;
 
 // Safety cap on payload size; Base USDC peaks at roughly 50 transfers per second.
-const MAX_TRANSFERS = 2000;
+const MAX_TRANSFERS = 3000;
+
+// A hung upstream call must not hold every request for that chain
+const HEIGHT_TIMEOUT_MS = 5_000;
+const QUERY_TIMEOUT_MS = 12_000;
 
 type CachedResult = { at: number; body: ChainResult };
 type ChainResult = { chain: string; chainId: number; transactions: TransactionData[]; count: number };
@@ -48,7 +53,11 @@ async function getTip(chain: ChainConfig): Promise<number> {
   const known = tips[chain.chainId];
   // After an idle spell the stored tip is stale, so look it up again
   if (known && Date.now() - known.at < 2 * CACHE_SECONDS * 1000) return known.height;
-  const res = await fetch(`${chain.hypersyncUrl}/height`, { headers: authHeaders(), cache: 'no-store' });
+  const res = await fetch(`${chain.hypersyncUrl}/height`, {
+    headers: authHeaders(),
+    cache: 'no-store',
+    signal: AbortSignal.timeout(HEIGHT_TIMEOUT_MS),
+  });
   if (!res.ok) throw new Error(`height ${res.status}`);
   const { height } = await res.json();
   tips[chain.chainId] = { height, at: Date.now() };
@@ -66,6 +75,7 @@ async function fetchLatestTransfers(chain: ChainConfig): Promise<ChainResult> {
     method: 'POST',
     headers: authHeaders(),
     cache: 'no-store',
+    signal: AbortSignal.timeout(QUERY_TIMEOUT_MS),
     body: JSON.stringify({
       from_block: fromBlock,
       logs: [{ address: [chain.usdcAddress.toLowerCase()], topics: [[TRANSFER_TOPIC]] }],
@@ -159,6 +169,11 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error(`[${chain.name}] Hypersync error:`, error);
+    // Serve the last good result rather than an error when there is one
+    const stale = cache[chain.chainId];
+    if (stale) {
+      return NextResponse.json(stale.body, { headers: { 'Cache-Control': 'no-store' } });
+    }
     return NextResponse.json(
       { error: 'Temporarily unavailable', chain: chain.name, chainId: chain.chainId },
       { status: 503, headers: { 'Cache-Control': 'no-store' } },
