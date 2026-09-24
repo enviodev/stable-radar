@@ -123,8 +123,9 @@ export function useHypersync(chainIds: number[]) {
 
     chainIds.forEach((chainId) => {
       const blockTimeMs = (chainConfig(chainId)?.blockTime ?? 2) * 1000;
-      const tickMs = Math.max(blockTimeMs, MIN_TICK_MS);
-      const blocksPerTick = Math.ceil(tickMs / blockTimeMs);
+      const blocksPerTick = Math.ceil(MIN_TICK_MS / blockTimeMs);
+      // Whole blocks per tick, so the replay runs at exactly chain speed
+      const tickMs = blocksPerTick * blockTimeMs;
 
       fetchChainData(chainId);
       intervalRefs.current.push(setInterval(() => fetchChainData(chainId), POLL_INTERVAL));

@@ -26,14 +26,16 @@ const LOOKBACK_SECONDS = 15;
 // Safety cap on payload size; Base USDC peaks at roughly 50 transfers per second.
 const MAX_TRANSFERS = 2000;
 
-type CachedResult = { at: number; body?: ChainResult };
+type CachedResult = { at: number; body: ChainResult };
 type ChainResult = { chain: string; chainId: number; transactions: TransactionData[]; count: number };
 
 // Per-instance memo so a warm function also reuses results between CDN misses
 const cache: Record<number, CachedResult> = {};
+// When the last upstream call failed, so errors are not retried by every request
+const failedAt: Record<number, number> = {};
 const inflight: Record<number, Promise<ChainResult> | undefined> = {};
 // Latest known chain tip, refreshed from every query response
-const tips: Record<number, number> = {};
+const tips: Record<number, { height: number; at: number }> = {};
 
 function authHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -43,11 +45,13 @@ function authHeaders(): Record<string, string> {
 }
 
 async function getTip(chain: ChainConfig): Promise<number> {
-  if (tips[chain.chainId]) return tips[chain.chainId];
+  const known = tips[chain.chainId];
+  // After an idle spell the stored tip is stale, so look it up again
+  if (known && Date.now() - known.at < 2 * CACHE_SECONDS * 1000) return known.height;
   const res = await fetch(`${chain.hypersyncUrl}/height`, { headers: authHeaders(), cache: 'no-store' });
   if (!res.ok) throw new Error(`height ${res.status}`);
   const { height } = await res.json();
-  tips[chain.chainId] = height;
+  tips[chain.chainId] = { height, at: Date.now() };
   return height;
 }
 
@@ -78,7 +82,7 @@ async function fetchLatestTransfers(chain: ChainConfig): Promise<ChainResult> {
   }
 
   const data: HypersyncResponse = await res.json();
-  if (data.archive_height) tips[chain.chainId] = data.archive_height;
+  if (data.archive_height) tips[chain.chainId] = { height: data.archive_height, at: Date.now() };
 
   const seen = new Set<string>();
   const transactions: TransactionData[] = [];
@@ -124,11 +128,13 @@ export async function GET(request: NextRequest) {
 
   try {
     const hit = cache[chain.chainId];
+    const coolingDown = Date.now() - (failedAt[chain.chainId] ?? 0) < CACHE_SECONDS * 1000;
     let body: ChainResult;
-    if (hit && Date.now() - hit.at < CACHE_SECONDS * 1000) {
-      // A recent failure is cached too, so errors never turn into a retry storm
-      if (!hit.body) throw new Error('cooling down after upstream error');
+    if ((hit && Date.now() - hit.at < CACHE_SECONDS * 1000) || (hit && coolingDown)) {
+      // After a failure, keep serving the last good result instead of retrying upstream
       body = hit.body;
+    } else if (coolingDown) {
+      throw new Error('cooling down after upstream error');
     } else {
       // Collapse concurrent requests for the same chain into one upstream call
       inflight[chain.chainId] ??= fetchLatestTransfers(chain)
@@ -137,7 +143,7 @@ export async function GET(request: NextRequest) {
           return result;
         })
         .catch((error) => {
-          cache[chain.chainId] = { at: Date.now() };
+          failedAt[chain.chainId] = Date.now();
           throw error;
         })
         .finally(() => {
