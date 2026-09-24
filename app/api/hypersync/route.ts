@@ -49,12 +49,16 @@ function authHeaders(): Record<string, string> {
   return headers;
 }
 
+// Stale data older than this is an outage, not a hiccup, so it is not served
+const MAX_STALE_MS = 120_000;
+
 async function getTip(chain: ChainConfig): Promise<number> {
   const known = tips[chain.chainId];
-  // After an idle spell the stored tip is stale, so look it up again
-  if (known && Date.now() - known.at < 2 * CACHE_SECONDS * 1000) return known.height;
+  // Estimate from block time rather than spending a call on /height; every query
+  // response corrects it with the real archive height
+  if (known) return known.height + Math.floor((Date.now() - known.at) / 1000 / chain.blockTime);
+  // /height is public, so it is called without the key and does not use the key's rate limit
   const res = await fetch(`${chain.hypersyncUrl}/height`, {
-    headers: authHeaders(),
     cache: 'no-store',
     signal: AbortSignal.timeout(HEIGHT_TIMEOUT_MS),
   });
@@ -140,7 +144,9 @@ export async function GET(request: NextRequest) {
     const hit = cache[chain.chainId];
     const coolingDown = Date.now() - (failedAt[chain.chainId] ?? 0) < CACHE_SECONDS * 1000;
     let body: ChainResult;
-    if ((hit && Date.now() - hit.at < CACHE_SECONDS * 1000) || (hit && coolingDown)) {
+    const fresh = hit && Date.now() - hit.at < CACHE_SECONDS * 1000;
+    const usableStale = hit && Date.now() - hit.at < MAX_STALE_MS;
+    if (fresh || (coolingDown && usableStale)) {
       // After a failure, keep serving the last good result instead of retrying upstream
       body = hit.body;
     } else if (coolingDown) {
@@ -164,14 +170,16 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(body, {
       headers: {
-        'Cache-Control': `public, s-maxage=${CACHE_SECONDS}, stale-while-revalidate=30`,
+        // Browsers always revalidate; only the CDN shares the response between visitors
+        'Cache-Control': 'public, max-age=0, must-revalidate',
+        'CDN-Cache-Control': `public, s-maxage=${CACHE_SECONDS}, stale-while-revalidate=10`,
       },
     });
   } catch (error) {
     console.error(`[${chain.name}] Hypersync error:`, error);
     // Serve the last good result rather than an error when there is one
     const stale = cache[chain.chainId];
-    if (stale) {
+    if (stale && Date.now() - stale.at < MAX_STALE_MS) {
       return NextResponse.json(stale.body, { headers: { 'Cache-Control': 'no-store' } });
     }
     return NextResponse.json(

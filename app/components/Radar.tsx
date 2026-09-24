@@ -154,7 +154,9 @@ export default function Radar({ chainName, transactionCount, color = '#00ff00', 
 
     // Update block statistics if we have new transactions
     if (newTxCount > 0 && oldestTimestamp !== null && newestTimestamp !== null) {
-      const timeSpan = Math.max(newestTimestamp - oldestTimestamp, blockTime);
+      // Fast chains release several blocks per tick, so divide by the whole span released
+      const releasedSpan = Math.ceil(0.5 / blockTime) * blockTime;
+      const timeSpan = Math.max(newestTimestamp - oldestTimestamp, releasedSpan);
       const rateForThisPeriod = newVolume / timeSpan;
       
       // Add this sample to our running statistics

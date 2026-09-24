@@ -58,7 +58,7 @@ export function useHypersync(chainIds: number[]) {
 
     const fetchChainData = async (chainId: number) => {
       try {
-        const response = await fetch(`/api/hypersync?chainId=${chainId}`);
+        const response = await fetch(`/api/hypersync?chainId=${chainId}`, { cache: 'no-store' });
         const data = await response.json().catch(() => ({}));
 
         if (!response.ok || data.error) {
