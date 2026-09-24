@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { decodeEventLog } from 'viem';
-import { CHAINS, HypersyncResponse, TransactionData } from '@/app/types/chains';
+import { CHAINS, ChainConfig, HypersyncResponse, TransactionData } from '@/app/types/chains';
 
 // ERC20 Transfer event ABI
 const TRANSFER_EVENT_ABI = {
@@ -13,231 +13,149 @@ const TRANSFER_EVENT_ABI = {
   ],
 } as const;
 
-// Store last seen block for each chain
-const lastSeenBlocks: Record<number, number> = {};
+const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 
-// Store seen transaction hashes for deduplication (per chain)
-const seenTransactions: Record<number, Set<string>> = {};
+// Every visitor shares the same response per chain for this long, so HyperSync
+// load stays flat no matter how many people have the page open.
+const CACHE_SECONDS = 10;
 
-// Initialize seen transactions sets
-Object.values(CHAINS).forEach((chain) => {
-  seenTransactions[chain.chainId] = new Set();
-  lastSeenBlocks[chain.chainId] = 0;
-});
+// Each response covers the most recent transfers in this window. Clients
+// dedupe by transaction hash, so overlapping windows are fine.
+const LOOKBACK_SECONDS = 15;
 
-// Clean up old transaction hashes periodically (keep last 10000 per chain)
-function cleanupSeenTransactions(chainId: number) {
-  const seen = seenTransactions[chainId];
-  if (seen.size > 10000) {
-    const arr = Array.from(seen);
-    seenTransactions[chainId] = new Set(arr.slice(-5000));
+// Safety cap on payload size; Base USDC peaks at roughly 50 transfers per second.
+const MAX_TRANSFERS = 2000;
+
+type CachedResult = { at: number; body?: ChainResult };
+type ChainResult = { chain: string; chainId: number; transactions: TransactionData[]; count: number };
+
+// Per-instance memo so a warm function also reuses results between CDN misses
+const cache: Record<number, CachedResult> = {};
+const inflight: Record<number, Promise<ChainResult> | undefined> = {};
+// Latest known chain tip, refreshed from every query response
+const tips: Record<number, number> = {};
+
+function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const apiKey = process.env.HYPERSYNC_API_KEY;
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+  return headers;
+}
+
+async function getTip(chain: ChainConfig): Promise<number> {
+  if (tips[chain.chainId]) return tips[chain.chainId];
+  const res = await fetch(`${chain.hypersyncUrl}/height`, { headers: authHeaders(), cache: 'no-store' });
+  if (!res.ok) throw new Error(`height ${res.status}`);
+  const { height } = await res.json();
+  tips[chain.chainId] = height;
+  return height;
+}
+
+async function fetchLatestTransfers(chain: ChainConfig): Promise<ChainResult> {
+  const tip = await getTip(chain);
+  const lookbackBlocks = Math.ceil((LOOKBACK_SECONDS + CACHE_SECONDS) / chain.blockTime);
+  // The cached tip lags by up to one cache window, so start before it and read to the head
+  const fromBlock = Math.max(0, tip - lookbackBlocks);
+
+  console.log(`[${chain.name}] Querying from block ${fromBlock}`);
+  const res = await fetch(`${chain.hypersyncUrl}/query`, {
+    method: 'POST',
+    headers: authHeaders(),
+    cache: 'no-store',
+    body: JSON.stringify({
+      from_block: fromBlock,
+      logs: [{ address: [chain.usdcAddress.toLowerCase()], topics: [[TRANSFER_TOPIC]] }],
+      field_selection: {
+        log: ['topic0', 'topic1', 'topic2', 'topic3', 'transaction_hash', 'block_number', 'data'],
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error(`[${chain.name}] Hypersync query failed:`, res.status, errorText);
+    throw new Error(`Hypersync query failed: ${res.status}`);
   }
+
+  const data: HypersyncResponse = await res.json();
+  if (data.archive_height) tips[chain.chainId] = data.archive_height;
+
+  const seen = new Set<string>();
+  const transactions: TransactionData[] = [];
+  const now = Date.now();
+
+  for (const item of data.data ?? []) {
+    for (const log of item.logs) {
+      if (seen.has(log.transaction_hash)) continue;
+      try {
+        const decoded = decodeEventLog({
+          abi: [TRANSFER_EVENT_ABI],
+          data: (log.data || '0x') as `0x${string}`,
+          topics: [log.topic0, log.topic1, log.topic2, log.topic3].filter(Boolean) as [`0x${string}`, ...`0x${string}`[]],
+        });
+        const args = decoded.args as { from: string; to: string; value: bigint };
+        seen.add(log.transaction_hash);
+        transactions.push({
+          transactionHash: log.transaction_hash,
+          blockNumber: log.block_number,
+          from: args.from,
+          to: args.to,
+          value: args.value.toString(),
+          timestamp: now,
+          chainId: chain.chainId,
+        });
+      } catch (error) {
+        console.error('Error decoding log:', error);
+      }
+    }
+  }
+
+  const latest = transactions.slice(-MAX_TRANSFERS);
+  return { chain: chain.name, chainId: chain.chainId, transactions: latest, count: latest.length };
 }
 
 export async function GET(request: NextRequest) {
-  const searchParams = request.nextUrl.searchParams;
-  const chainId = searchParams.get('chainId');
-  const debug = searchParams.get('debug') === 'true';
-
-  if (!chainId) {
-    return NextResponse.json({ error: 'Chain ID required' }, { status: 400 });
-  }
-
-  const chain = Object.values(CHAINS).find((c) => c.chainId === parseInt(chainId));
+  const chainId = parseInt(request.nextUrl.searchParams.get('chainId') ?? '');
+  const chain = Object.values(CHAINS).find((c) => c.chainId === chainId);
 
   if (!chain) {
     return NextResponse.json({ error: 'Invalid chain ID' }, { status: 400 });
   }
 
-  const debugInfo: any = {
-    chain: chain.name,
-    chainId: chain.chainId,
-    usdcAddress: chain.usdcAddress,
-    hypersyncUrl: chain.hypersyncUrl,
-  };
-
   try {
-    // Get the last block we queried, or query only the latest blocks on first run
-    let fromBlock = lastSeenBlocks[chain.chainId];
-    
-    // For the first query, get the CURRENT height from the height endpoint
-    if (!fromBlock) {
-      // Build headers with API key for height query
-      const heightHeaders: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      const apiKey = process.env.HYPERSYNC_API_KEY;
-      if (apiKey) {
-        heightHeaders['Authorization'] = `Bearer ${apiKey}`;
-      }
-      
-      // Use the dedicated height endpoint to get the current block height
-      const heightResponse = await fetch(`${chain.hypersyncUrl}/height`, {
-        method: 'GET',
-        headers: heightHeaders,
-      });
-      
-      if (heightResponse.ok) {
-        const heightData = await heightResponse.json();
-        if (heightData.height) {
-          // Start from current height - 10 blocks for safety (to catch very recent transfers)
-          fromBlock = Math.max(0, heightData.height - 10);
-          console.log(`[${chain.name}] Starting from block ${fromBlock} (current height: ${heightData.height})`);
-        }
-      } else {
-        const errorText = await heightResponse.text();
-        console.error(`[${chain.name}] Height query failed:`, heightResponse.status, errorText);
-      }
-      
-      // Fallback: if we still don't have a block, use 0
-      if (!fromBlock) {
-        fromBlock = 0;
-      }
-    }
-
-    const queryPayload = {
-      from_block: fromBlock,
-      to_block: fromBlock + 10000, // Limit range
-      logs: [
-        {
-          address: [chain.usdcAddress.toLowerCase()],
-          topics: [['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef']],
-        },
-      ],
-      field_selection: {
-        block: ['timestamp'],
-        transaction: ['block_hash', 'from', 'to', 'value', 'status', 'chain_id'],
-        log: ['address', 'topic0', 'topic1', 'topic2', 'topic3', 'transaction_hash', 'block_number', 'data'],
-      },
-    };
-
-    debugInfo.fromBlock = fromBlock;
-    debugInfo.queryPayload = queryPayload;
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-
-    // Add API key - REQUIRED from November 3, 2025
-    const apiKey = process.env.HYPERSYNC_API_KEY;
-    if (apiKey) {
-      headers['Authorization'] = `Bearer ${apiKey}`;
-      debugInfo.hasApiKey = true;
+    const hit = cache[chain.chainId];
+    let body: ChainResult;
+    if (hit && Date.now() - hit.at < CACHE_SECONDS * 1000) {
+      // A recent failure is cached too, so errors never turn into a retry storm
+      if (!hit.body) throw new Error('cooling down after upstream error');
+      body = hit.body;
     } else {
-      debugInfo.hasApiKey = false;
-      console.warn(`[${chain.name}] WARNING: No API key found. HyperSync requires API tokens from November 3, 2025.`);
+      // Collapse concurrent requests for the same chain into one upstream call
+      inflight[chain.chainId] ??= fetchLatestTransfers(chain)
+        .then((result) => {
+          cache[chain.chainId] = { at: Date.now(), body: result };
+          return result;
+        })
+        .catch((error) => {
+          cache[chain.chainId] = { at: Date.now() };
+          throw error;
+        })
+        .finally(() => {
+          inflight[chain.chainId] = undefined;
+        });
+      body = await inflight[chain.chainId]!;
     }
 
-    console.log(`[${chain.name}] Querying from block ${fromBlock}...`);
-    
-    const response = await fetch(`${chain.hypersyncUrl}/query`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(queryPayload),
+    return NextResponse.json(body, {
+      headers: {
+        'Cache-Control': `public, s-maxage=${CACHE_SECONDS}, stale-while-revalidate=30`,
+      },
     });
-
-    debugInfo.responseStatus = response.status;
-    debugInfo.responseOk = response.ok;
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      debugInfo.errorResponse = errorText;
-      console.error(`[${chain.name}] Hypersync query failed:`, response.status, errorText);
-      throw new Error(`Hypersync query failed: ${response.status} - ${errorText}`);
-    }
-
-    const data: HypersyncResponse = await response.json();
-
-    debugInfo.archiveHeight = data.archive_height;
-    debugInfo.nextBlock = data.next_block;
-    debugInfo.dataItems = data.data?.length || 0;
-    debugInfo.totalLogs = data.data?.reduce((acc, item) => acc + item.logs.length, 0) || 0;
-
-    console.log(`[${chain.name}] Response: ${debugInfo.dataItems} items, ${debugInfo.totalLogs} logs, next_block: ${data.next_block}, archive_height: ${data.archive_height}`);
-
-    // Update last seen block
-    if (data.next_block) {
-      lastSeenBlocks[chain.chainId] = data.next_block;
-    } else if (data.archive_height && !lastSeenBlocks[chain.chainId]) {
-      // On first query, set to current archive height
-      lastSeenBlocks[chain.chainId] = data.archive_height;
-    }
-
-    // Process and deduplicate transactions
-    const transactions: TransactionData[] = [];
-    const seen = seenTransactions[chain.chainId];
-
-    for (const item of data.data) {
-      for (let i = 0; i < item.logs.length; i++) {
-        const log = item.logs[i];
-        
-        // Skip if we've already seen this transaction
-        if (seen.has(log.transaction_hash)) {
-          continue;
-        }
-
-        try {
-          // Decode the transfer event to get the value
-          // The topics are: topic0 (event signature), topic1 (from), topic2 (to)
-          // The value is in the data field (non-indexed parameter)
-          const decoded = decodeEventLog({
-            abi: [TRANSFER_EVENT_ABI],
-            data: (log as any).data || '0x',
-            topics: [log.topic0, log.topic1, log.topic2, log.topic3].filter(Boolean) as any,
-          });
-
-          const transferData = decoded.args as { from: string; to: string; value: bigint };
-
-          // Get block timestamp - use current time as fallback since blocks might not always be included
-          const timestamp = (item as any).blocks?.[0]?.timestamp || Date.now();
-
-          transactions.push({
-            transactionHash: log.transaction_hash,
-            blockNumber: log.block_number,
-            from: transferData.from,
-            to: transferData.to,
-            value: transferData.value.toString(), // Convert BigInt to string for JSON serialization
-            timestamp: typeof timestamp === 'number' ? timestamp * 1000 : Date.now(), // Convert to milliseconds
-            chainId: chain.chainId,
-          });
-
-          // Mark as seen
-          seen.add(log.transaction_hash);
-        } catch (error) {
-          console.error('Error decoding log:', error);
-          // Continue processing other logs
-        }
-      }
-    }
-
-    // Cleanup old transactions periodically
-    if (Math.random() < 0.1) {
-      // 10% chance
-      cleanupSeenTransactions(chain.chainId);
-    }
-
-    console.log(`[${chain.name}] Processed ${transactions.length} new transactions, total seen: ${seen.size}`);
-
-    const result = {
-      chain: chain.name,
-      chainId: chain.chainId,
-      transactions,
-      count: transactions.length,
-      totalTransactions: seen.size,
-      ...(debug ? { debug: debugInfo } : {}),
-    };
-
-    return NextResponse.json(result);
-  } catch (error: any) {
-    console.error(`[${chain?.name || 'Unknown'}] Hypersync error:`, error);
-    debugInfo.error = error.message;
-    debugInfo.errorStack = error.stack;
-    return NextResponse.json({ 
-      error: error.message,
-      chain: chain?.name,
-      chainId: chain?.chainId,
-      debug: debugInfo 
-    }, { status: 500 });
+  } catch (error) {
+    console.error(`[${chain.name}] Hypersync error:`, error);
+    return NextResponse.json(
+      { error: 'Temporarily unavailable', chain: chain.name, chainId: chain.chainId },
+      { status: 503, headers: { 'Cache-Control': 'no-store' } },
+    );
   }
 }
-
